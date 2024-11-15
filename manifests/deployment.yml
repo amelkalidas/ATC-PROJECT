@@ -1,0 +1,19 @@
+apiVersion : apps/v1
+kind: Deployment
+metadata:
+  name: atcprojectimage 
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: atcprojectimage
+  template:
+    metadata:
+      labels:
+        app: atcprojectimage 
+    spec:
+      containers:
+        - name: atcprojectimage 
+          image: atcprojwebappcontainerreg.azurecr.io/proj-webapp
+          ports:
+          - containerPort: 80

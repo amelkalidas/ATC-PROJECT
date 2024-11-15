@@ -1,0 +1,101 @@
+trigger: 
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - Terraform-Kubecluster
+
+pool:
+  name: ATC
+
+stages:
+  - stage: TF_plan
+    jobs:
+      - job: terraform_plan
+        steps:
+          - checkout: self
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: 'latest'
+          - task: TerraformTaskV4@4
+            displayName: Terraform Init with Backend Configuration
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-Kubecluster'
+              backendServiceArm: 'atc-webapp-svc'
+              backendAzureRmResourceGroupName: '29102024'
+              backendAzureRmStorageAccountName: 'tfstatefile29'
+              backendAzureRmContainerName: 'terraform-ado'
+              backendAzureRmKey: 'terraform.tfstate'
+          
+
+          - task: TerraformTaskV4@4
+            displayName: Terraform validate 
+            inputs:
+              provider: 'azurerm'
+              command: 'validate'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-Kubecluster'
+          
+          - task: TerraformTaskV4@4
+            displayName: Terraform Plan
+            inputs:
+              provider: 'azurerm'
+              command: 'plan'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-Kubecluster'
+              commandOptions: '--input=false -out=$(System.DefaultWorkingDirectory)/Terraform-Kubecluster/tfplan'
+              environmentServiceNameAzureRM: 'atc-webapp-svc'
+          
+          - task: CmdLine@2
+            displayName: 'Archiving the Plan'
+            inputs:
+              script: 'zip -r $(Build.ArtifactStagingDirectory)/$(Build.BuildId)build.zip . -x ".*"'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/Terraform-Kubecluster' 
+          
+          - task: PublishBuildArtifacts@1
+            inputs:
+              PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+              ArtifactName: '$(Build.BuildId)-tfplan'
+              publishLocation: 'Container'
+
+  - stage: TF_DEPLOY
+    dependsOn: [TF_plan]    
+    jobs:
+      - job: Terraform_deploy
+        steps:
+          - task: TerraformInstaller@1
+            inputs:
+              terraformVersion: 'latest'
+          - task: DownloadBuildArtifacts@1
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: '$(Build.BuildId)-tfplan'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: ExtractFiles@1
+            inputs:
+              archiveFilePatterns: '$(System.ArtifactsDirectory)/$(Build.BuildId)-tfplan/$(Build.BuildId)build.zip'
+              destinationFolder: '$(System.DefaultWorkingDirectory)/terraform_cd/'
+              cleanDestinationFolder: true
+              overwriteExistingFiles: true
+
+          - task: TerraformTaskV4@4
+            inputs:
+              provider: 'azurerm'
+              command: 'init'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_cd/'
+              backendServiceArm: 'atc-webapp-svc'
+              backendAzureRmResourceGroupName: '29102024'
+              backendAzureRmStorageAccountName: 'tfstatefile29'
+              backendAzureRmContainerName: 'terraform-ado'
+              backendAzureRmKey: 'terraform.tfstate'
+          - task: TerraformTaskV4@4
+            inputs:
+              provider: 'azurerm'
+              command: 'apply'
+              workingDirectory: '$(System.DefaultWorkingDirectory)/terraform_cd/'
+              commandOptions: '-auto-approve tfplan'
+              environmentServiceNameAzureRM: 'atc-webapp-svc'
+       
